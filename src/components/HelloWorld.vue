@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { ref } from 'vue';
+import axios from 'axios';
 import draggable from 'vuedraggable';
 
 interface TreeItem {
@@ -11,20 +12,37 @@ interface TreeItem {
 
 const selected = ref<number[]>([]);
 
-const treeData = ref<TreeItem[]>([
-  {
-    id: 1,
-    name: 'Main Folder',
-    type: 'folder',
-    children: [
-      { id: 2, name: 'File 1', type: 'file' },
-      { id: 3, name: 'Sub Folder', type: 'folder', children: [] }
-    ]
-  }
-]);
+const treeData = ref<TreeItem[]>([]);
 
 const editingItem = ref<TreeItem | null>(null);
 
+// API URL
+const apiUrl = 'https://localhost:7100/api/Folders';
+
+// Fetch folders from the API
+const fetchFolders = async () => {
+  try {
+    const response = await axios.get(apiUrl);
+    treeData.value = response.data.map((folder: any) => ({
+      id: folder.folderGuid,
+      name: folder.folderName,
+      type: 'folder',
+      children: folder.children ? folder.children.map((child: any) => ({
+        id: child.folderGuid,
+        name: child.folderName,
+        type: 'folder',
+        children: []
+      })) : []
+    }));
+  } catch (error) {
+    console.error('Error fetching folders:', error);
+  }
+};
+
+// Function to fetch data when the component is created
+fetchFolders();
+
+// Helper function to get parent array
 const getParentArray = (item: TreeItem): TreeItem[] => {
   const findParent = (items: TreeItem[], targetId: number): TreeItem[] | null => {
     for (const i of items) {
@@ -36,11 +54,11 @@ const getParentArray = (item: TreeItem): TreeItem[] => {
     }
     return null;
   };
-
   return findParent(treeData.value, item.id) || treeData.value;
 };
 
-const addItem = (parent: TreeItem) => {
+// Add item (folder/file) in the tree
+const addItem = async (parent: TreeItem) => {
   if (!parent.children) parent.children = [];
   const newItem: TreeItem = {
     id: Date.now(),
@@ -48,9 +66,20 @@ const addItem = (parent: TreeItem) => {
     type: parent.type === 'folder' ? 'file' : 'folder',
   };
   parent.children.push(newItem);
+
+  try {
+    await axios.post(apiUrl, {
+      folderName: newItem.name,
+      description: 'New item',
+      parentFolderGuid: parent.id
+    });
+  } catch (error) {
+    console.error('Error adding item:', error);
+  }
 };
 
-const deleteItem = (item: TreeItem) => {
+// Delete item
+const deleteItem = async (item: TreeItem) => {
   if (item.id === 1) {
     // Prevent deletion of the main folder
     console.log('Main folder cannot be deleted');
@@ -75,13 +104,21 @@ const deleteItem = (item: TreeItem) => {
   if (!deleteRecursive(treeData.value, item.id)) {
     console.error('Item not found');
   }
+
+  try {
+    await axios.delete(`${apiUrl}/${item.id}`);
+  } catch (error) {
+    console.error('Error deleting item:', error);
+  }
 };
 
+// Start editing
 const startEditing = (item: TreeItem) => {
   editingItem.value = { ...item };
 };
 
-const finishEditing = () => {
+// Finish editing
+const finishEditing = async () => {
   if (editingItem.value) {
     const updateName = (items: TreeItem[]) => {
       for (const i of items) {
@@ -93,10 +130,20 @@ const finishEditing = () => {
       }
     };
     updateName(treeData.value);
+
+    try {
+      await axios.put(`${apiUrl}/${editingItem.value.id}`, {
+        folderName: editingItem.value.name
+      });
+    } catch (error) {
+      console.error('Error updating item:', error);
+    }
+
     editingItem.value = null;
   }
 };
 
+// Handle drag change
 const onDragChange = (event: any, item: TreeItem) => {
   if (event.added) {
     const newIndex = event.added.newIndex;
@@ -116,10 +163,9 @@ const newItemName = ref('');
 const currentParentItem = ref<TreeItem | null>(null);
 const itemType = ref<'category' | 'table'>('category');
 
-
 const nameRequiredRule = (value: string) => !!value || 'Name is required';
 
-
+// Open dialog for adding a new item (category/table)
 const openAddItemDialog = (type: 'category' | 'table', parent: TreeItem) => {
   itemType.value = type;
   currentParentItem.value = parent;
@@ -127,9 +173,9 @@ const openAddItemDialog = (type: 'category' | 'table', parent: TreeItem) => {
   dialogVisible.value = true;
 };
 
-
-const createItem = () => {
-  if (!newItemName.value) return;
+// Create item (category/table)
+const createItem = async () => {
+  if (!newItemName.value || !currentParentItem.value) return;
 
   const newItem: TreeItem = {
     id: Date.now(),
@@ -140,7 +186,17 @@ const createItem = () => {
   if (!currentParentItem.value?.children) currentParentItem.value.children = [];
   currentParentItem.value.children.push(newItem);
 
-  dialogVisible.value = false; 
+  try {
+    await axios.post(apiUrl, {
+      folderName: newItem.name,
+      description: 'New item',
+      parentFolderGuid: currentParentItem.value.id
+    });
+  } catch (error) {
+    console.error('Error creating item:', error);
+  }
+
+  dialogVisible.value = false;
 };
 </script>
 
@@ -160,7 +216,7 @@ const createItem = () => {
 
     <template #append="{ item }">
       <v-menu bottom left>
-        <template #activator="{ props }" >
+        <template #activator="{ props }">
           <v-btn icon small v-bind="props">
             <v-icon color="blue">mdi-plus</v-icon>
           </v-btn>
@@ -198,8 +254,6 @@ const createItem = () => {
         </template>
         <template v-else>
           <span>{{ item.name }}</span>
-          <!-- Delete Button (except Main Folder) -->
-
         </template>
       </div>
     </template>
